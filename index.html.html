@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>誰是幸運兒？</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        :root { 
+            --color1: #0ABAB5; --color2: #F8F32B; --color3: #714955; 
+            --color4: #035E7B; --color5: #002E2C; --bg: #001a19; 
+        }
+        body { 
+            font-family: "Microsoft JhengHei", sans-serif; 
+            background: var(--bg); color: white; margin: 0;
+            display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+        }
+        h1 { font-size: 3rem; color: var(--color1); text-shadow: 0 0 15px rgba(10, 186, 181, 0.5); margin: 20px 0; }
+        .control-panel { 
+            background: rgba(255,255,255,0.1); padding: 20px; 
+            border-radius: 20px; border: 1px solid var(--color1);
+            display: flex; gap: 15px; align-items: center; margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+        #machine-container { width: 500px; height: 500px; background: radial-gradient(circle, var(--color5) 0%, #000 100%); border: 8px solid var(--color1); border-radius: 50%; position: relative; overflow: hidden; }
+        canvas { display: block; }
+        .draw-btn { padding: 12px 40px; font-size: 1.3rem; font-weight: bold; background: linear-gradient(135deg, var(--color1), var(--color4)); color: white; border: none; border-radius: 50px; cursor: pointer; }
+        .draw-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        #result-display { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; margin-top: 30px; width: 90%; }
+        .win-ball { width: 110px; height: 110px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; animation: pop 0.5s ease-out; }
+        .win-ball.main { background: linear-gradient(135deg, var(--color2), var(--color1)); color: #000; border: 3px solid #fff; }
+        .win-ball.wait { background: linear-gradient(135deg, var(--color3), var(--color4)); color: #fff; border: 3px solid var(--color1); }
+        .win-ball::before { content: '🌱'; position: absolute; top: -10px; font-size: 20px; }
+        .download-btn { margin-top: 20px; padding: 10px 20px; background: var(--color1); border: none; border-radius: 10px; cursor: pointer; display: none; font-weight: bold; }
+        @keyframes pop { from { transform: scale(0); } to { transform: scale(1); } }
+        input[type="number"] { width: 50px; border-radius: 5px; border: 1px solid var(--color1); text-align: center; }
+    </style>
+</head>
+<body>
+
+    <h1>🌱 誰是幸運兒？ 🌱</h1>
+
+    <div class="control-panel">
+        <input type="file" id="fileInput" accept=".xlsx, .xls">
+        <label>正取:</label> <input type="number" id="mainQ" value="5">
+        <label>備取:</label> <input type="number" id="waitQ" value="5">
+        <button class="draw-btn" id="startBtn" onclick="handleStart()">喚醒精靈！</button>
+    </div>
+
+    <div id="machine-container"></div>
+    <div id="result-display"></div>
+    <button id="downloadBtn" class="download-btn" onclick="exportResults()">📥 下載名單</button>
+
+    <audio id="sound-shake" src="https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3" loop></audio>
+    <audio id="sound-win" src="https://assets.mixkit.co/active_storage/sfx/1992/1992-preview.mp3"></audio>
+
+<script>
+    const { Engine, Render, Runner, Bodies, Composite, Body } = Matter;
+    let engine, render, runner, balls = [];
+    let names = [];
+    let winners = [];
+    const colors = ['#0ABAB5', '#F8F32B', '#714955', '#035E7B', '#002E2C'];
+
+    function init() {
+        const container = document.getElementById('machine-container');
+        container.innerHTML = ''; 
+        engine = Engine.create();
+        render = Render.create({
+            element: container,
+            engine: engine,
+            options: { width: 500, height: 500, wireframes: false, background: 'transparent' }
+        });
+
+        const parts = 60;
+        for (let i = 0; i < parts; i++) {
+            const angle = (i / parts) * Math.PI * 2;
+            const x = 250 + Math.cos(angle) * 245;
+            const y = 250 + Math.sin(angle) * 245;
+            const wall = Bodies.rectangle(x, y, 50, 20, { isStatic: true, angle: angle + Math.PI/2, render: { visible: false } });
+            Composite.add(engine.world, wall);
+        }
+
+        Render.run(render);
+        runner = Runner.create();
+        Runner.run(runner, engine);
+    }
+
+    document.getElementById('fileInput').onchange = function(e) {
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            const data = new Uint8Array(ev.target.result);
+            const wb = XLSX.read(data, {type: 'array'});
+            names = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1}).map(r => r[0]).filter(n => n);
+            alert("成功載入 " + names.length + " 人！");
+            init();
+        };
+        reader.readAsArrayBuffer(e.target.files[0]);
+    };
+
+    async function handleStart() {
+        if (!names.length) return alert("請先上傳 Excel！");
+        const mQ = parseInt(document.getElementById('mainQ').value) || 0;
+        const wQ = parseInt(document.getElementById('waitQ').value) || 0;
+        if (mQ + wQ > names.length) return alert("人數不足！");
+
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('result-display').innerHTML = '';
+        winners = [];
+
+        // 1. 掉落小球
+        document.getElementById('sound-shake').play();
+        for (let name of names) {
+            const ball = Bodies.circle(250 + (Math.random()-0.5)*40, 50, 26, {
+                restitution: 1.1, friction: 0.05,
+                render: { fillStyle: colors[Math.floor(Math.random()*colors.length)], strokeStyle: '#fff', lineWidth: 2 }
+            });
+            balls.push(ball);
+            Composite.add(engine.world, ball);
+            await new Promise(r => setTimeout(r, 40)); 
+        }
+
+        await new Promise(r => setTimeout(r, 1000));
+
+        // 2. 攪動
+        const shaker = setInterval(() => {
+            balls.forEach(b => Body.applyForce(b, b.position, { x: (Math.random()-0.5)*0.08, y: -0.1 }));
+        }, 100);
+
+        // 3. 抽籤
+        const shuffled = [...names].sort(() => Math.random() - 0.5);
+        const winSound = document.getElementById('sound-win'); // 抓取音效元件
+
+        for (let i = 0; i < (mQ + wQ); i++) {
+            await new Promise(r => setTimeout(r, 1500));
+            
+            // --- 每一球都發聲的修正處 ---
+            winSound.pause();
+            winSound.currentTime = 0; 
+            winSound.play();
+            // --------------------------
+
+            const isMain = i < mQ;
+            const type = isMain ? "正取" : "備取";
+            winners.push({ "姓名": shuffled[i], "狀態": type });
+
+            const el = document.createElement('div');
+            el.className = `win-ball ${isMain ? 'main' : 'wait'}`;
+            el.innerHTML = `<span class="type-tag">${type}</span><span class="name-tag">${shuffled[i]}</span>`;
+            document.getElementById('result-display').appendChild(el);
+            
+            if (balls.length > 0) Composite.remove(engine.world, balls.pop());
+        }
+
+        clearInterval(shaker);
+        document.getElementById('sound-shake').pause();
+        document.getElementById('downloadBtn').style.display = 'block';
+        document.getElementById('startBtn').disabled = false;
+    }
+
+    function exportResults() {
+        const ws = XLSX.utils.json_to_sheet(winners);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "結果");
+        XLSX.writeFile(wb, "抽籤結果.xlsx");
+    }
+
+    init();
+</script>
+</body>
+</html>
