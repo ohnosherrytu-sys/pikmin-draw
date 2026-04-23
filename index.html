@@ -16,24 +16,40 @@
             display: flex; flex-direction: column; align-items: center; min-height: 100vh;
         }
         h1 { font-size: 3rem; color: var(--color1); text-shadow: 0 0 15px rgba(10, 186, 181, 0.5); margin: 20px 0; }
+        
         .control-panel { 
-            background: rgba(255,255,255,0.1); padding: 20px; 
+            background: rgba(255,255,255,0.1); padding: 25px; 
             border-radius: 20px; border: 1px solid var(--color1);
-            display: flex; gap: 15px; align-items: center; margin-bottom: 20px;
-            backdrop-filter: blur(10px);
+            display: flex; flex-direction: column; gap: 15px; align-items: center; margin-bottom: 20px;
+            backdrop-filter: blur(10px); width: 90%; max-width: 600px;
         }
+        
+        .input-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+        
+        /* 手動輸入框樣式 */
+        #manualInput {
+            width: 100%; height: 80px; background: rgba(0,0,0,0.3);
+            border: 1px dashed var(--color1); color: #fff; padding: 10px;
+            border-radius: 10px; resize: vertical; font-family: inherit;
+        }
+        #manualInput::placeholder { color: rgba(255,255,255,0.3); }
+
         #machine-container { width: 500px; height: 500px; background: radial-gradient(circle, var(--color5) 0%, #000 100%); border: 8px solid var(--color1); border-radius: 50%; position: relative; overflow: hidden; }
         canvas { display: block; }
-        .draw-btn { padding: 12px 40px; font-size: 1.3rem; font-weight: bold; background: linear-gradient(135deg, var(--color1), var(--color4)); color: white; border: none; border-radius: 50px; cursor: pointer; }
+        .draw-btn { padding: 12px 45px; font-size: 1.4rem; font-weight: bold; background: linear-gradient(135deg, var(--color1), var(--color4)); color: white; border: none; border-radius: 50px; cursor: pointer; transition: 0.3s; }
+        .draw-btn:hover { transform: scale(1.05); box-shadow: 0 0 20px var(--color1); }
         .draw-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        
         #result-display { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; margin-top: 30px; width: 90%; }
         .win-ball { width: 110px; height: 110px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; animation: pop 0.5s ease-out; }
         .win-ball.main { background: linear-gradient(135deg, var(--color2), var(--color1)); color: #000; border: 3px solid #fff; }
         .win-ball.wait { background: linear-gradient(135deg, var(--color3), var(--color4)); color: #fff; border: 3px solid var(--color1); }
         .win-ball::before { content: '🌱'; position: absolute; top: -10px; font-size: 20px; }
+        
         .download-btn { margin-top: 20px; padding: 10px 20px; background: var(--color1); border: none; border-radius: 10px; cursor: pointer; display: none; font-weight: bold; }
         @keyframes pop { from { transform: scale(0); } to { transform: scale(1); } }
-        input[type="number"] { width: 50px; border-radius: 5px; border: 1px solid var(--color1); text-align: center; }
+        input[type="number"] { width: 50px; border-radius: 5px; border: 1px solid var(--color1); text-align: center; background: #000; color: #fff; padding: 5px; }
+        label { font-size: 0.9rem; color: var(--color1); }
     </style>
 </head>
 <body>
@@ -41,10 +57,17 @@
     <h1>🌱 誰是幸運兒？ 🌱</h1>
 
     <div class="control-panel">
+        <textarea id="manualInput" placeholder="在此輸入姓名（每行一個，或直接從 Excel 貼上單欄文字）"></textarea>
+        
+        <div style="font-size: 0.8rem; color: #888;">── 或者 ──</div>
+        
         <input type="file" id="fileInput" accept=".xlsx, .xls">
-        <label>正取:</label> <input type="number" id="mainQ" value="5">
-        <label>備取:</label> <input type="number" id="waitQ" value="5">
-        <button class="draw-btn" id="startBtn" onclick="handleStart()">喚醒精靈！</button>
+
+        <div class="input-group">
+            <label>正取:</label> <input type="number" id="mainQ" value="5">
+            <label>備取:</label> <input type="number" id="waitQ" value="5">
+            <button class="draw-btn" id="startBtn" onclick="handleStart()">喚醒精靈！</button>
+        </div>
     </div>
 
     <div id="machine-container"></div>
@@ -85,12 +108,14 @@
         Runner.run(runner, engine);
     }
 
+    // Excel 處理
     document.getElementById('fileInput').onchange = function(e) {
         const reader = new FileReader();
         reader.onload = function(ev) {
             const data = new Uint8Array(ev.target.result);
             const wb = XLSX.read(data, {type: 'array'});
             names = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1}).map(r => r[0]).filter(n => n);
+            document.getElementById('manualInput').value = names.join('\n'); // 同步顯示到文字框
             alert("成功載入 " + names.length + " 人！");
             init();
         };
@@ -98,17 +123,30 @@
     };
 
     async function handleStart() {
-        if (!names.length) return alert("請先上傳 Excel！");
+        // 抓取手動輸入的名單
+        const rawText = document.getElementById('manualInput').value;
+        names = rawText.split('\n').map(n => n.trim()).filter(n => n !== "");
+
+        if (!names.length) return alert("請輸入姓名或上傳 Excel！");
+        
         const mQ = parseInt(document.getElementById('mainQ').value) || 0;
         const wQ = parseInt(document.getElementById('waitQ').value) || 0;
-        if (mQ + wQ > names.length) return alert("人數不足！");
+        if (mQ + wQ > names.length) return alert("總抽獎人數超過名單總數！");
 
-        document.getElementById('startBtn').disabled = true;
+        const startBtn = document.getElementById('startBtn');
+        startBtn.disabled = true;
         document.getElementById('result-display').innerHTML = '';
         winners = [];
 
-        // 1. 掉落小球
+        // 重新初始化球池
+        if(balls.length > 0) {
+            Composite.remove(engine.world, balls);
+            balls = [];
+        }
+
         document.getElementById('sound-shake').play();
+        
+        // 1. 掉落球體
         for (let name of names) {
             const ball = Bodies.circle(250 + (Math.random()-0.5)*40, 50, 26, {
                 restitution: 1.1, friction: 0.05,
@@ -126,18 +164,15 @@
             balls.forEach(b => Body.applyForce(b, b.position, { x: (Math.random()-0.5)*0.08, y: -0.1 }));
         }, 100);
 
-        // 3. 抽籤
+        // 3. 抽籤揭曉
         const shuffled = [...names].sort(() => Math.random() - 0.5);
-        const winSound = document.getElementById('sound-win'); // 抓取音效元件
+        const winSound = document.getElementById('sound-win');
 
         for (let i = 0; i < (mQ + wQ); i++) {
             await new Promise(r => setTimeout(r, 1500));
-            
-            // --- 每一球都發聲的修正處 ---
             winSound.pause();
             winSound.currentTime = 0; 
             winSound.play();
-            // --------------------------
 
             const isMain = i < mQ;
             const type = isMain ? "正取" : "備取";
@@ -154,7 +189,7 @@
         clearInterval(shaker);
         document.getElementById('sound-shake').pause();
         document.getElementById('downloadBtn').style.display = 'block';
-        document.getElementById('startBtn').disabled = false;
+        startBtn.disabled = false;
     }
 
     function exportResults() {
